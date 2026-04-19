@@ -1,0 +1,72 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    healthcheck: 
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  gateway:
+    build: ./gateway
+    # Проверка, чтобы шлюз не падал сразу, если Kafka долго грузится
+    restart: on-failure 
+    ports:
+      - "8080:8080"
+    volumes:
+      - shared_data:/app/shared_data
+      # - ./deepfake-detector-frontend/build:/app/static
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  converter:
+    build: ./converter
+    restart: on-failure
+    volumes:
+      - shared_data:/app/shared_data
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  detector:
+    build: ./detector
+    restart: on-failure
+    deploy:
+      replicas: 1
+    volumes:
+      - shared_data:/app/shared_data
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  bot:
+    build: ./bot
+    restart: on-failure
+    environment:
+      - GATEWAY_URL=http://gateway:8080
+    env_file:
+      - .env
+    depends_on:
+      - gateway
+
+volumes:
+  shared_data:
